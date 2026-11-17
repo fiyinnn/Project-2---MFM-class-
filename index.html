@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project 2: Flow Matching and Creative Point-Cloud Generation</title>
+<style>
+  :root { --text:#1f2328; --muted:#5b636e; --rule:#e3e6ea; --accent:#1f5fae; --soft:#f6f8fa; }
+  * { box-sizing: border-box; }
+  body { margin:0; color:var(--text); background:#fff;
+         font: 17px/1.65 Georgia, "Times New Roman", serif; }
+  main { max-width: 820px; margin: 0 auto; padding: 48px 24px 80px; }
+  h1, h2, h3, .byline, table, figcaption, .eq, nav { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  h1 { font-size: 2rem; line-height:1.25; margin: 0 0 8px; }
+  .byline { color: var(--muted); font-size: .95rem; margin-bottom: 28px; }
+  nav { font-size:.9rem; background: var(--soft); border:1px solid var(--rule); border-radius:8px; padding:12px 16px; margin-bottom:36px; }
+  nav a { color: var(--accent); text-decoration:none; margin-right:14px; white-space:nowrap; }
+  h2 { font-size: 1.45rem; margin: 52px 0 12px; padding-top: 12px; border-top: 1px solid var(--rule); }
+  h3 { font-size: 1.12rem; margin: 30px 0 8px; }
+  p, li { margin: 0 0 14px; }
+  figure { margin: 22px 0 30px; }
+  figure img { width:100%; height:auto; border:1px solid var(--rule); border-radius:6px; background:#fff; }
+  figure.gif img { max-width: 520px; display:block; margin: 0 auto; }
+  figcaption { color: var(--muted); font-size: .88rem; margin-top: 8px; line-height:1.5; }
+  .eq { text-align:center; font-size:1.1rem; background:var(--soft); border-radius:6px; padding:12px; margin: 8px 0 18px; }
+  table { width:100%; border-collapse: collapse; font-size: .92rem; margin: 10px 0 22px; }
+  th, td { border-bottom: 1px solid var(--rule); padding: 8px 10px; text-align:left; vertical-align: top; }
+  th { background: var(--soft); font-weight: 600; }
+  td.num, th.num { text-align:right; font-variant-numeric: tabular-nums; }
+  code { font-family: Consolas, Menlo, monospace; font-size: .9em; background: var(--soft); padding: 1px 4px; border-radius: 4px; }
+  .wide { overflow-x:auto; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Project 2: Flow Matching and Creative Point-Cloud Generation</h1>
+<div class="byline">Fiyin · November 2026</div>
+
+<nav>
+  <a href="#summary">Summary</a><a href="#setup">Setup</a><a href="#part1">Part 1: Ring</a>
+  <a href="#part2">Part 2: Smiley</a><a href="#part3">Part 3: Reflow</a><a href="#limitations">Limitations</a>
+  <a href="#takeaway">Final takeaway</a><a href="#code">Code</a>
+</nav>
+
+<h2 id="summary">Summary</h2>
+<p>In this project we are asked to train small neural networks to transform 2D Gaussian noise into point-cloud distributions using flow matching. A noisy ring served as the simple target and a smiley line drawing as the creative target. The baseline learned the ring well. On the smiley, it captured the outer circle but largely missed the eyes and mouth, and mostly scattered points across the face instead.</p>
+<p>Increasing the number of Euler steps improved the baseline's distribution score, with only small gains past 25 steps. One round of reflow made the sampling trajectories almost perfectly straight, and with 5 steps it matched the baseline's 50-step score. Reflow did not improve on the baseline's best score, which is consistent with it learning from the baseline's own outputs.</p>
+
+<h2 id="setup">Setup and reproducibility</h2>
+<p>The main run used seed 2026 on a CPU in Google Colab. Because the trained models were saved, the extra figures and step-count comparisons did not require retraining.</p>
+<div class="wide"><table>
+  <tr><th>What the assignment asks for</th><th>What I used</th></tr>
+  <tr><td>Device</td><td>Google Colab, CPU only and 1 processing thread</td></tr>
+  <tr><td>Package versions</td><td>Python 3.13.18, PyTorch 2.14.1, NumPy 2.4.6, Matplotlib 3.10.0</td></tr>
+  <tr><td>Model architecture</td><td>A small neural network (MLP) with 3 hidden layers of 128 units each. It takes a point's position and the time (x, y, t) and outputs a velocity. 33,794 parameters in total.</td></tr>
+  <tr><td>Training settings</td><td>Adam optimizer (AdamW variant), learning rate 0.001, 256 examples per batch. Ring and smiley models trained for 10,000 steps each; reflow model for 6,000 steps.</td></tr>
+  <tr><td>Random seeds</td><td>2026 for the main run. 2027 and 2028 for the two extra runs in Part 3.</td></tr>
+  <tr><td>Measured runtime</td><td>Training: ring 58.5 s, smiley 63.3 s, reflow 36.3 s. Building the reflow dataset (40,000 start–end pairs): 7.0 s.</td></tr>
+</table></div>
+<p>The same architecture and optimizer were used for all three models.</p>
+
+<h2 id="part1">Part 1: Learning a 2D flow on a ring</h2>
+
+<h3>Source, target and training pairs</h3>
+<p>Each training example was built in four steps:</p>
+<ol>
+  <li><strong>Starting point (x₀):</strong> a random point from a standard 2D Gaussian, for example like random noise centered at the origin.</li>
+  <li><strong>End point (x₁):</strong> a random point on the ring. The ring is centered at the origin with radius 0.8. Each point gets a random angle, and its distance from the center is jittered slightly (standard deviation 0.06), so the ring has some thickness.</li>
+  <li><strong>Pairing:</strong> each starting point is matched with a random end point.</li>
+  <li><strong>Time (t):</strong> a random number between 0 and 1. Time 0 is the noise and time 1 is the ring. The training point sits that fraction of the way along the straight line between the pair:</li>
+</ol>
+<div class="eq">x<sub>t</sub> = (1 − t) x<sub>0</sub> + t x<sub>1</sub>, &nbsp;&nbsp;&nbsp; u = x<sub>1</sub> − x<sub>0</sub></div>
+<p>Figure 1 shows randomly selected pairs. Velocity is constant along each training path because the derivative of x<sub>t</sub> with respect to t is x₁ − x₀, which does not depend on t.</p>
+<figure><img src="figures/part1_training_paths.png" alt="Randomly paired straight training paths">
+  <figcaption>Figure 1. Randomly paired straight training paths from Gaussian sources to ring targets.</figcaption></figure>
+
+<h3>Model and training loss</h3>
+<p>The MLP takes a point's coordinates and its time, (x<sub>t</sub>, y<sub>t</sub>, t), and predicts a 2D velocity. It is trained by minimizing the mean squared error between that prediction and u = x₁ − x₀. At generation time the network never sees an endpoint; it only sees where a point is and when.</p>
+<p>The loss (Figure 2) fell from 2.73 to about 1.5 and then fluctuated around that level instead of going to zero. With random pairing, many training lines with different directions pass through the same location at the same time, so the best the network can do is predict their average velocity. The remaining loss is the spread of those velocities around the average.</p>
+<figure><img src="figures/loss_curves.png" alt="Training loss curves">
+  <figcaption>Figure 2. Training loss for the ring, smiley baseline and reflow models (log scale).</figcaption></figure>
+
+<h3>Generating new points</h3>
+<p>New samples start from fresh Gaussian points, without being told where they should end up. Each step moves every point a small distance along the predicted velocity (forward Euler, as given in the brief).</p>
+<p>Figure 3 shows the generated cloud at t = 0, 0.2, 0.4, 0.6, 0.8 and 1.0 over 50 Euler steps. It first contracts into a dense disk, and only after t ≈ 0.8 does the center empty out to form the ring. The final samples (Figure 4) largely overlap independent target samples. A handful of points land outside the band, a few near the center.</p>
+<figure><img src="figures/part1_ring_snapshots.png" alt="Ring samples during sampling">
+  <figcaption>Figure 3. Generated ring samples at six times during 50-step Euler sampling.</figcaption></figure>
+<figure><img src="figures/part1_ring_generated.png" alt="Final ring samples" style="max-width:480px;display:block;margin:0 auto;">
+  <figcaption>Figure 4. Final generated ring samples (blue) over independent target samples (orange).</figcaption></figure>
+<p>Figure 5 shows the ring model's learned field at t = 0, 0.5 and 0.9. At t = 0 the arrows point gently inward everywhere. By t = 0.9 the field pushes points onto the ring from both sides: points outside are pulled in, and points inside the ring are pushed outward, strongly near the center.</p>
+<figure><img src="figures/part1_ring_velocity_field.png" alt="Ring velocity field">
+  <figcaption>Figure 5. Learned velocity field of the ring model at t = 0, 0.5 and 0.9.</figcaption></figure>
+
+<h3>Learned trajectories vs. training paths</h3>
+<p>The straight lines in Figure 1 are only how training examples are built; the model never follows them. A generated particle follows the averaged field instead, so its path can bend. Figure 6 puts the two side by side. Training lines cross the whole plot in every direction, while learned trajectories run roughly toward the ring and many curve near the end. On the ring, mean path excess (trajectory length minus start-to-end distance, 50 steps) was 0.288, so straight training paths did not produce straight sampling trajectories. Part 3 measures the same thing on the smiley.</p>
+<figure><img src="figures/part1_learned_vs_training_paths.png" alt="Training paths vs learned trajectories">
+  <figcaption>Figure 6. Straight training paths (left) vs. learned 50-step sampling trajectories (right) on the ring.</figcaption></figure>
+
+<h2 id="part2">Part 2: A creative target and its animation</h2>
+
+<h3>The smiley target</h3>
+<p>The creative target is a synthetic smiley line drawing: a circular outline, two small circular eyes and a parabolic mouth. Points were spread across the three parts in proportion to curve length, so longer strokes get more points. Each point was placed uniformly along its curve and then moved by isotropic Gaussian jitter with standard deviation 0.022. The intended distribution is therefore a set of thin, thickened strokes, not a filled face. The drawing was generated in code; no external image or licensed material was used.</p>
+<p>The smiley baseline was trained with the same settings as the ring model (10,000 steps, 63.3 s).</p>
+
+<h3>Animating the learned transport</h3>
+<p>The animation below follows 1,500 Gaussian particles through every Euler step as they move into the smiley, then pauses on the final frame. Faint grey dots in the background are samples of the intended target, so you can see where the particles should end up. Figure 7 shows five representative frames from the start to the end of the animation.</p>
+<figure class="gif"><img src="figures/smiley_transport.gif" alt="Animation: Gaussian noise moving into the smiley">
+  <figcaption style="text-align:center">Animation. Learned transport from Gaussian noise to the smiley (50 Euler steps, final frame held).</figcaption></figure>
+<figure><img src="figures/smiley_still_frames.png" alt="Still frames from the animation">
+  <figcaption>Figure 7. Five frames from the animation, t = 0 to 1. Color = angle of each particle's starting point; grey = intended target. By t = 1 the outer circle is filled, but few particles reach the eyes and mouth.</figcaption></figure>
+<p>Each particle is colored by the angle of its Gaussian starting point around the origin, using a cyclic HSV colormap, and keeps that color for the whole animation. I only added the colors to visualize the GIF. They play no part in training; the network only predicts which way each point moves. Because the colors stay in coherent bands, the animation shows that particles roughly keep their starting direction: those starting upper-left end on the upper-left of the face, and so on. (I had an earlier version of colored particles by their index in the array, but felt like it looked random because the sources are random so it was replaced with this position-based scheme.)</p>
+
+<h3>Sampling trade-off</h3>
+<p>With the trained weights and the initial Gaussian samples fixed, I compared 1, 5, 10, 25 and 50 Euler steps on 3,000 points. Each step costs one network evaluation. Quality was measured as half the L1 distance between normalized 2D histograms of generated samples and 3,000 independent target samples (0 = identical, 1 = no overlap). The grid is 40 × 40 bins over [−1.5, 1.5]², with an extra one-bin-wide overflow ring around the edge so that points just outside the box still count. The same grid was used for every comparison. Points beyond the overflow ring would be dropped, but in every evaluation reported here no generated or target point left the plot area, so this had no effect.</p>
+<p>In the table below, the baseline and reflow models start from the same 3,000 Gaussian points, so their scores can be compared directly. Sampling time excludes rendering.</p>
+<div class="wide"><table>
+  <tr><th class="num">Euler steps</th><th class="num">Network evaluations</th><th class="num">Baseline score</th><th class="num">Baseline time (s)</th><th class="num">Reflow score</th><th class="num">Reflow time (s)</th></tr>
+  <tr><td class="num">1</td><td class="num">1</td><td class="num">0.995</td><td class="num">0.0075</td><td class="num">0.414</td><td class="num">0.0067</td></tr>
+  <tr><td class="num">5</td><td class="num">5</td><td class="num">0.802</td><td class="num">0.0308</td><td class="num">0.374</td><td class="num">0.0337</td></tr>
+  <tr><td class="num">10</td><td class="num">10</td><td class="num">0.460</td><td class="num">0.0621</td><td class="num">0.371</td><td class="num">0.0616</td></tr>
+  <tr><td class="num">25</td><td class="num">25</td><td class="num">0.382</td><td class="num">0.1587</td><td class="num">0.372</td><td class="num">0.1525</td></tr>
+  <tr><td class="num">50</td><td class="num">50</td><td class="num">0.374</td><td class="num">0.3196</td><td class="num">0.375</td><td class="num">0.3252</td></tr>
+</table></div>
+<p>An earlier baseline-only run used a different set of 3,000 Gaussian starting points and gave 0.995, 0.796, 0.463, 0.383 and 0.368. The trend is the same; the small differences show how much the score moves with the choice of samples.</p>
+<p>For the baseline, more steps steadily improved the score, from 0.995 at one step to 0.374 at 50. Most of the gain came before 25 steps. Going from 25 to 50 steps doubled the cost for an improvement of 0.008. Figure 8 shows why (top row). At one step, every point moves once along the field at t = 0, which points toward the middle, so the samples collapse into a small blob. At five steps the outer circle forms but is too small. By 25 steps the circle sits on the target.</p>
+<figure><img src="figures/smiley_steps_baseline_vs_reflow.png" alt="Smiley samples by model and step count">
+  <figcaption>Figure 8. Final smiley samples for the baseline (top) and reflow (bottom) at 1, 5, 10, 25 and 50 Euler steps, with scores.</figcaption></figure>
+<p>Some errors do not go away with more steps. At 50 steps, the outer circle matches the target closely, but the eyes and mouth are mostly missing and many points are scattered across the inside of the face. Since the score has leveled off by 25–50 steps, this remaining error comes from the learned field (or from how hard thin, small strokes are to learn), not from Euler discretization. The smiley model's velocity field (Figure 9) is consistent with this: at t = 0.9 its arrows point broadly toward the outline and show little of the eye and mouth structure.</p>
+<figure><img src="figures/velocity_field.png" alt="Smiley velocity field">
+  <figcaption>Figure 9. Learned velocity field of the smiley baseline at t = 0, 0.5 and 0.9.</figcaption></figure>
+
+<h2 id="part3">Part 3: Does reflow straighten the paths?</h2>
+
+<h3>Hypothesis</h3>
+<p>My hypothesis was that retraining once on the baseline's own start–end pairs (reflow) would make the paths the dots travel much straighter. Because straight paths are easy to follow, reflow should then reach about the same result as the baseline with far fewer steps.</p>
+<p>I did not expect reflow to beat the baseline's best score, because it copies the baseline's endpoints instead of learning the real smiley.</p>
+
+<h3>Reflow dataset and model</h3>
+<p>The trained smiley baseline was frozen. I drew 40,000 Gaussian source points, ran each through the baseline with 50 Euler steps, and saved each source together with its own generated endpoint. The pairs weren't shuffled, and the true smiley target was never used in place of a generated endpoint. A second model with the same architecture was then trained for 6,000 steps on straight interpolations between these saved pairs, using the same loss as before.</p>
+<p>Both models were compared on 3,000 held-out Gaussian starting points, drawn from a separate random stream (seed 2030) from the 40,000 reflow sources (seed 2032), using identical step counts and the same quality score as Part 2.</p>
+
+<h3>Results</h3>
+<p>Straightness was measured as mean path excess: the length of each trajectory minus the straight-line distance from its start to its end, averaged over particles, on a common 50-step time grid. A perfectly straight path has excess 0.</p>
+<div class="wide"><table>
+  <tr><th>Model</th><th class="num">Mean trajectory length</th><th class="num">Mean start-to-end distance</th><th class="num">Mean path excess</th></tr>
+  <tr><td>Baseline</td><td class="num">0.7962</td><td class="num">0.4864</td><td class="num">0.3097</td></tr>
+  <tr><td>Reflow</td><td class="num">0.4840</td><td class="num">0.4837</td><td class="num">0.00031</td></tr>
+</table></div>
+<p>Reflow paths are almost perfectly straight: excess fell by a factor of about 1,000 (Figure 10). The two models move particles a similar overall distance (0.486 vs. 0.484); the baseline just takes a much longer route to get there.</p>
+<figure><img src="figures/part3_trajectories_baseline_vs_reflow.png" alt="Baseline vs reflow trajectories">
+  <figcaption>Figure 10. Sampling trajectories of 60 particles for the baseline (left) and reflow (right); black dots are endpoints.</figcaption></figure>
+<p>Distribution quality and sampling time are in the Part 2 table and the bottom row of Figure 8. With 5 steps, reflow scored 0.374, the same as the baseline at 50 steps, with 10× fewer network evaluations (0.034 s vs. 0.320 s). A single reflow step scored 0.414, better than the baseline at 10 steps in this seed, but that did not hold in every seed (below). From 5 steps on, reflow stayed between 0.371 and 0.375 and never beat the baseline's best score.</p>
+<p>The reflow loss fell from 0.446 to about 0.001, whereas the baseline loss stayed around 1.5 (Figure 2). Each reflow source has exactly one endpoint, so the training lines rarely conflict and the network can fit them almost exactly. That is why the learned field produces straight paths.</p>
+
+<h3>Repeating with two more seeds</h3>
+<p>I repeated the smiley baseline and reflow experiment with seeds 2027 and 2028, with identical settings. These runs were done on a different machine (PyTorch 2.15), so only scores and straightness are reported, not runtimes.</p>
+<div class="wide"><table>
+  <tr><th>Seed</th><th class="num">Baseline, 5 steps</th><th class="num">Baseline, 50 steps</th><th class="num">Reflow, 1 step</th><th class="num">Reflow, 5 steps</th><th class="num">Baseline path excess</th><th class="num">Reflow path excess</th></tr>
+  <tr><td>2026 (main)</td><td class="num">0.802</td><td class="num">0.374</td><td class="num">0.414</td><td class="num">0.374</td><td class="num">0.310</td><td class="num">0.00031</td></tr>
+  <tr><td>2027</td><td class="num">0.762</td><td class="num">0.460</td><td class="num">0.476</td><td class="num">0.444</td><td class="num">0.320</td><td class="num">0.00018</td></tr>
+  <tr><td>2028</td><td class="num">0.775</td><td class="num">0.398</td><td class="num">0.541</td><td class="num">0.398</td><td class="num">0.301</td><td class="num">0.00008</td></tr>
+  <tr><td><strong>Mean</strong></td><td class="num">0.780</td><td class="num">0.411</td><td class="num">0.477</td><td class="num">0.405</td><td class="num">0.310</td><td class="num">0.00019</td></tr>
+</table></div>
+<p>The two main findings held in all three seeds. Reflow cut path excess from about 0.31 to under 0.001, and 5-step reflow matched or slightly beat 50-step baseline (difference −0.017 to +0.001). The one-step result did not hold: in seed 2028, one reflow step (0.541) was clearly worse than 10 baseline steps (0.454). The baseline's own 50-step score varied from 0.374 to 0.460 across seeds, which is much larger than any difference between the two models within a seed.</p>
+
+<h3>One-time cost of reflow</h3>
+<p>These costs are separate from the inference times above:</p>
+<ul>
+  <li>Generating the 40,000 pairs: 7.0 s</li>
+  <li>Training the reflow model: 36.3 s (6,000 steps)</li>
+  <li>Total: 43.3 s, on top of the 63.3 s used to train the baseline</li>
+</ul>
+<p>Switching from 50-step baseline sampling to 5-step reflow sampling saves about 0.29 s per batch of samples the size used here. The one-time cost would only pay off after roughly 150 such batches. For a single demo, reflow costs more time overall; its benefit is for repeated or real-time sampling.</p>
+
+<h3>What the evidence supports</h3>
+<p>The results support the hypothesis, consistently across three seeds. Reflow made the trajectories nearly straight and reached the baseline's 50-step quality at 5 steps. Straighter paths did not make the samples more accurate: reflow leveled off at the baseline's best score and inherited the same failure, with the eyes and mouth largely missing (Figure 8, bottom row).</p>
+<p>Alternative explanations:</p>
+<ul>
+  <li><strong>An easier learning problem, not just straighter paths.</strong> Reflow learns a fixed, one-to-one mapping from sources to the baseline's endpoints, which is easier than the original randomly paired problem. Straightness and fast sampling come from the same cause, so this experiment cannot separate them.</li>
+  <li><strong>Extra training.</strong> The reflow model received 6,000 extra steps of training on top of the baseline. I don't make any claim about training efficiency, so I didn't need to compare it against a baseline trained for the same extra steps. I'd only need that comparison to argue that reflow is a better use of the same training time.</li>
+  <li><strong>Noise in the score.</strong> Differences of a few thousandths between the models are far smaller than the 0.374–0.460 spread of the baseline across seeds, so they should not be treated as real differences.</li>
+  <li><strong>Choice of score.</strong> The histogram grid is coarse relative to the thin strokes, so it may not fully capture how badly the eyes and mouth are missed. Both models are scored on the same grid, so the comparison between them is fair, even if the absolute numbers understate the error.</li>
+</ul>
+
+<h2 id="limitations">Limitations</h2>
+<ul>
+  <li><strong>Few seeds.</strong> The Part 3 findings were checked on three seeds; Parts 1 and 2 used one. Three seeds show the main findings are not a one-off, but are too few to estimate variability precisely, and the extra seeds ran on a different machine and PyTorch version.</li>
+  <li><strong>One synthetic target.</strong> The stroke thickness (σ = 0.022) and the rule for dividing points between the outline, eyes and mouth define what counts as correct. A thicker or differently weighted drawing could give different results.</li>
+  <li><strong>The quality score.</strong> The histogram score depends on the grid resolution and range, and it compares densities rather than shapes. It does not directly measure whether the eyes and mouth are recognizable.</li>
+  <li><strong>Timing.</strong> Runtimes depend on hardware and software and come from a single measurement each.</li>
+  <li><strong>Inherited errors.</strong> Reflow learns from baseline-generated endpoints, so it cannot fix the baseline's mistakes on the eyes and mouth.</li>
+</ul>
+
+<h2 id="takeaway">Final takeaway</h2>
+<p>A small flow model gets the big shape right but misses fine detail, and neither more sampling steps nor reflow fixes that. Reflow is worth it for speed, not accuracy.</p>
+
+<h2 id="code">Code</h2>
+<p>The code is submitted separately on Blackboard and is not published here. It is organized as follows:</p>
+<div class="wide"><table>
+  <tr><th>File</th><th>What it does</th></tr>
+  <tr><td><code>part_1.py</code></td><td>Part 1: trains the ring model and makes Figures 1, 3, 4, 5 and 6</td></tr>
+  <tr><td><code>part_2.py</code></td><td>Part 2: trains the smiley baseline, runs the step-count comparison, and makes the animation and Figures 7 and 9</td></tr>
+  <tr><td><code>part_3.py</code></td><td>Part 3: builds the reflow pairs, trains the reflow model, runs the comparison and extra seeds, and makes Figures 2, 8 and 10</td></tr>
+  <tr><td><code>utils.py</code></td><td>Shared code: target samplers, the network, training, Euler sampling, the quality score and plotting</td></tr>
+</table></div>
+
+</main>
+</body>
+</html>
