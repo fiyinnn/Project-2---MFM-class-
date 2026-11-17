@@ -72,29 +72,29 @@
 </ol>
 <div class="eq">x<sub>t</sub> = (1 − t) x<sub>0</sub> + t x<sub>1</sub>, &nbsp;&nbsp;&nbsp; u = x<sub>1</sub> − x<sub>0</sub></div>
 <p>Figure 1 shows randomly selected pairs. Velocity is constant along each training path because the derivative of x<sub>t</sub> with respect to t is x₁ − x₀, which does not depend on t.</p>
-<figure><img src="figures/part1_training_paths.png" alt="Randomly paired straight training paths">
+<figure><img src="part1_training_paths.png" alt="Randomly paired straight training paths">
   <figcaption>Figure 1. Randomly paired straight training paths from Gaussian sources to ring targets.</figcaption></figure>
 
 <h3>Model and training loss</h3>
 <p>The MLP takes a point's coordinates and its time, (x<sub>t</sub>, y<sub>t</sub>, t), and predicts a 2D velocity. It is trained by minimizing the mean squared error between that prediction and u = x₁ − x₀. At generation time the network never sees an endpoint; it only sees where a point is and when.</p>
 <p>The loss (Figure 2) fell from 2.73 to about 1.5 and then fluctuated around that level instead of going to zero. With random pairing, many training lines with different directions pass through the same location at the same time, so the best the network can do is predict their average velocity. The remaining loss is the spread of those velocities around the average.</p>
-<figure><img src="figures/loss_curves.png" alt="Training loss curves">
+<figure><img src="loss_curves.png" alt="Training loss curves">
   <figcaption>Figure 2. Training loss for the ring, smiley baseline and reflow models (log scale).</figcaption></figure>
 
 <h3>Generating new points</h3>
 <p>New samples start from fresh Gaussian points, without being told where they should end up. Each step moves every point a small distance along the predicted velocity (forward Euler, as given in the brief).</p>
 <p>Figure 3 shows the generated cloud at t = 0, 0.2, 0.4, 0.6, 0.8 and 1.0 over 50 Euler steps. It first contracts into a dense disk, and only after t ≈ 0.8 does the center empty out to form the ring. The final samples (Figure 4) largely overlap independent target samples. A handful of points land outside the band, a few near the center.</p>
-<figure><img src="figures/part1_ring_snapshots.png" alt="Ring samples during sampling">
+<figure><img src="part1_ring_snapshots.png" alt="Ring samples during sampling">
   <figcaption>Figure 3. Generated ring samples at six times during 50-step Euler sampling.</figcaption></figure>
-<figure><img src="figures/part1_ring_generated.png" alt="Final ring samples" style="max-width:480px;display:block;margin:0 auto;">
+<figure><img src="part1_ring_generated.png" alt="Final ring samples" style="max-width:480px;display:block;margin:0 auto;">
   <figcaption>Figure 4. Final generated ring samples (blue) over independent target samples (orange).</figcaption></figure>
 <p>Figure 5 shows the ring model's learned field at t = 0, 0.5 and 0.9. At t = 0 the arrows point gently inward everywhere. By t = 0.9 the field pushes points onto the ring from both sides: points outside are pulled in, and points inside the ring are pushed outward, strongly near the center.</p>
-<figure><img src="figures/part1_ring_velocity_field.png" alt="Ring velocity field">
+<figure><img src="part1_ring_velocity_field.png" alt="Ring velocity field">
   <figcaption>Figure 5. Learned velocity field of the ring model at t = 0, 0.5 and 0.9.</figcaption></figure>
 
 <h3>Learned trajectories vs. training paths</h3>
 <p>The straight lines in Figure 1 are only how training examples are built; the model never follows them. A generated particle follows the averaged field instead, so its path can bend. Figure 6 puts the two side by side. Training lines cross the whole plot in every direction, while learned trajectories run roughly toward the ring and many curve near the end. On the ring, mean path excess (trajectory length minus start-to-end distance, 50 steps) was 0.288, so straight training paths did not produce straight sampling trajectories. Part 3 measures the same thing on the smiley.</p>
-<figure><img src="figures/part1_learned_vs_training_paths.png" alt="Training paths vs learned trajectories">
+<figure><img src="part1_learned_vs_training_paths.png" alt="Training paths vs learned trajectories">
   <figcaption>Figure 6. Straight training paths (left) vs. learned 50-step sampling trajectories (right) on the ring.</figcaption></figure>
 
 <h2 id="part2">Part 2: A creative target and its animation</h2>
@@ -105,9 +105,9 @@
 
 <h3>Animating the learned transport</h3>
 <p>The animation below follows 1,500 Gaussian particles through every Euler step as they move into the smiley, then pauses on the final frame. Faint grey dots in the background are samples of the intended target, so you can see where the particles should end up. Figure 7 shows five representative frames from the start to the end of the animation.</p>
-<figure class="gif"><img src="figures/smiley_transport.gif" alt="Animation: Gaussian noise moving into the smiley">
+<figure class="gif"><img src="smiley_transport.gif" alt="Animation: Gaussian noise moving into the smiley">
   <figcaption style="text-align:center">Animation. Learned transport from Gaussian noise to the smiley (50 Euler steps, final frame held).</figcaption></figure>
-<figure><img src="figures/smiley_still_frames.png" alt="Still frames from the animation">
+<figure><img src="smiley_still_frames.png" alt="Still frames from the animation">
   <figcaption>Figure 7. Five frames from the animation, t = 0 to 1. Color = angle of each particle's starting point; grey = intended target. By t = 1 the outer circle is filled, but few particles reach the eyes and mouth.</figcaption></figure>
 <p>Each particle is colored by the angle of its Gaussian starting point around the origin, using a cyclic HSV colormap, and keeps that color for the whole animation. I only added the colors to visualize the GIF. They play no part in training; the network only predicts which way each point moves. Because the colors stay in coherent bands, the animation shows that particles roughly keep their starting direction: those starting upper-left end on the upper-left of the face, and so on. (I had an earlier version of colored particles by their index in the array, but felt like it looked random because the sources are random so it was replaced with this position-based scheme.)</p>
 
@@ -124,10 +124,10 @@
 </table></div>
 <p>An earlier baseline-only run used a different set of 3,000 Gaussian starting points and gave 0.995, 0.796, 0.463, 0.383 and 0.368. The trend is the same; the small differences show how much the score moves with the choice of samples.</p>
 <p>For the baseline, more steps steadily improved the score, from 0.995 at one step to 0.374 at 50. Most of the gain came before 25 steps. Going from 25 to 50 steps doubled the cost for an improvement of 0.008. Figure 8 shows why (top row). At one step, every point moves once along the field at t = 0, which points toward the middle, so the samples collapse into a small blob. At five steps the outer circle forms but is too small. By 25 steps the circle sits on the target.</p>
-<figure><img src="figures/smiley_steps_baseline_vs_reflow.png" alt="Smiley samples by model and step count">
+<figure><img src="smiley_steps_baseline_vs_reflow.png" alt="Smiley samples by model and step count">
   <figcaption>Figure 8. Final smiley samples for the baseline (top) and reflow (bottom) at 1, 5, 10, 25 and 50 Euler steps, with scores.</figcaption></figure>
 <p>Some errors do not go away with more steps. At 50 steps, the outer circle matches the target closely, but the eyes and mouth are mostly missing and many points are scattered across the inside of the face. Since the score has leveled off by 25–50 steps, this remaining error comes from the learned field (or from how hard thin, small strokes are to learn), not from Euler discretization. The smiley model's velocity field (Figure 9) is consistent with this: at t = 0.9 its arrows point broadly toward the outline and show little of the eye and mouth structure.</p>
-<figure><img src="figures/velocity_field.png" alt="Smiley velocity field">
+<figure><img src="velocity_field.png" alt="Smiley velocity field">
   <figcaption>Figure 9. Learned velocity field of the smiley baseline at t = 0, 0.5 and 0.9.</figcaption></figure>
 
 <h2 id="part3">Part 3: Does reflow straighten the paths?</h2>
@@ -148,7 +148,7 @@
   <tr><td>Reflow</td><td class="num">0.4840</td><td class="num">0.4837</td><td class="num">0.00031</td></tr>
 </table></div>
 <p>Reflow paths are almost perfectly straight: excess fell by a factor of about 1,000 (Figure 10). The two models move particles a similar overall distance (0.486 vs. 0.484); the baseline just takes a much longer route to get there.</p>
-<figure><img src="figures/part3_trajectories_baseline_vs_reflow.png" alt="Baseline vs reflow trajectories">
+<figure><img src="part3_trajectories_baseline_vs_reflow.png" alt="Baseline vs reflow trajectories">
   <figcaption>Figure 10. Sampling trajectories of 60 particles for the baseline (left) and reflow (right); black dots are endpoints.</figcaption></figure>
 <p>Distribution quality and sampling time are in the Part 2 table and the bottom row of Figure 8. With 5 steps, reflow scored 0.374, the same as the baseline at 50 steps, with 10× fewer network evaluations (0.034 s vs. 0.320 s). A single reflow step scored 0.414, better than the baseline at 10 steps in this seed, but that did not hold in every seed (below). From 5 steps on, reflow stayed between 0.371 and 0.375 and never beat the baseline's best score.</p>
 <p>The reflow loss fell from 0.446 to about 0.001, whereas the baseline loss stayed around 1.5 (Figure 2). Each reflow source has exactly one endpoint, so the training lines rarely conflict and the network can fit them almost exactly. That is why the learned field produces straight paths.</p>
